@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: flexible_rdbms_postgres
+    environment:
+      POSTGRES_USER: main_user
+      POSTGRES_PASSWORD: main_password
+      POSTGRES_DB: flexible_rdbms
+    ports:
+      - "5432:5432"
+    volumes:
+      - flexible_rdbms_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U main_user -d flexible_rdbms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  flexible_rdbms_data:
