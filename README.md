@@ -374,4 +374,5 @@ PostgreSQL handles "add a column" very well, and even "add a list of strings". I
 ## Further reading
 
 - **[The deep dive: details and objection handling](DEEP_DIVE.md).** Everything this post skips: the full migration in SQL, step by step; what the MongoDB side really involves; the two-window lost-update script; the 12-row join; how a foreign key can break an old batch job; what MongoDB *doesn't* win; and the lock details a DBA will ask about. Read this before presenting to a technical audience.
+- **[Schema evolution at a glance: SQL vs. MongoDB](sql-vs-mongodb-schema-evolution.html)**, by Kevin See. A one-page interactive illustration of the same idea with a different example: a CRM customer profile that evolves through five stages (more fields, child data, three customer types, and a field that changes shape). At each stage it shows the data side by side, with the read, write and schema-change code for both. Download it and open it in a browser.
 - **MongoDB vs. PostgreSQL JSONB** *(coming soon)*: the same comparison for teams that store evolving data in JSONB instead of normalizing it.

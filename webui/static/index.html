@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evolvability Demo</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <strong>Evolvability on a live database</strong>
+      <span class="muted">MongoDB vs. PostgreSQL</span>
+    </div>
+    <div class="chips">
+      <span class="chip" id="chip-mongodb"><i></i>MongoDB</span>
+      <span class="chip" id="chip-postgres"><i></i>PostgreSQL</span>
+      <span class="chip" id="chip-stream"><i></i>Live output</span>
+    </div>
+    <div class="top-actions">
+      <button id="btn-uri">MongoDB URI</button>
+      <button id="btn-locks">Lock monitor</button>
+      <button id="btn-stop-all">Stop all</button>
+      <button id="btn-reset" class="danger">Reset…</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="steps" id="steps" aria-label="Demo steps"></nav>
+
+    <main>
+      <section class="card stepcard" id="stepcard"></section>
+
+      <section class="card lockpanel" id="lockpanel" hidden>
+        <div class="panel-head">
+          <h3>PostgreSQL lock queue <span class="muted">pg_stat_activity, refreshed every second</span></h3>
+          <button data-close-locks>Hide</button>
+        </div>
+        <div id="lock-body"></div>
+        <p class="muted small">Read it from the bottom up: a blocked session lists the pid it's waiting for in <em>blocked by</em>. This page's own connections are left out.</p>
+      </section>
+
+      <div class="columns">
+        <section class="col" data-db="mongodb">
+          <div class="col-head">
+            <h2>MongoDB</h2>
+            <div class="dbstate" id="state-mongodb">…</div>
+          </div>
+          <div class="terms" id="terms-mongodb"></div>
+          <details class="card peek" data-db="mongodb">
+            <summary>Data peek <span class="muted">sample documents, like Compass</span></summary>
+            <div class="peek-body"></div>
+          </details>
+        </section>
+
+        <section class="col" data-db="postgres">
+          <div class="col-head">
+            <h2>PostgreSQL</h2>
+            <div class="dbstate" id="state-postgres">…</div>
+          </div>
+          <div class="terms" id="terms-postgres"></div>
+          <details class="card peek" data-db="postgres">
+            <summary>Data peek <span class="muted">sample rows, like psql</span></summary>
+            <div class="peek-body"></div>
+          </details>
+        </section>
+      </div>
+
+      <section class="system" id="terms-system"></section>
+    </main>
+  </div>
+
+  <dialog id="dlg-confirm">
+    <form method="dialog">
+      <h3>Before you run this</h3>
+      <p id="confirm-text"></p>
+      <div class="dlg-actions">
+        <button value="cancel">Cancel</button>
+        <button value="ok" class="primary">Run anyway</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-uri">
+    <form method="dialog">
+      <h3>MongoDB connection string</h3>
+      <p class="muted small">Kept in the server's memory for this session only and passed to the MongoDB scripts as <code>MONGODB_URI</code>. It's never written to a file. To skip this step, set <code>MONGODB_URI</code> before starting the server.</p>
+      <input id="uri-input" type="password" autocomplete="off" spellcheck="false" placeholder="mongodb+srv://main_user:&lt;password&gt;@&lt;your-cluster&gt;/">
+      <label class="small"><input type="checkbox" id="uri-show"> Show</label>
+      <div class="dlg-actions">
+        <button value="cancel">Cancel</button>
+        <button value="ok" class="primary">Use this URI</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-reset">
+    <form method="dialog">
+      <h3>Reset the demo</h3>
+      <p>Stops every running script, then runs <code>clean_environment.py</code> in both databases.</p>
+      <label><input type="checkbox" id="reset-docker"> Also remove the PostgreSQL container and its data (<code>docker compose down -v</code>)</label>
+      <div class="dlg-actions">
+        <button value="cancel">Cancel</button>
+        <button value="ok" class="danger">Reset</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

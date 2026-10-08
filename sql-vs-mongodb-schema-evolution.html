@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
+</head>
+<body>
+<title>SQL vs MongoDB Schema Evolution</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@300;400;500;600;700&family=Source+Code+Pro:wght@400;600&display=swap">
+<style>
+/* Layout: sticky stage stepper on top, then a two-column SQL | MongoDB comparison
+   with data shape above and synchronised query tabs below. */
+:root {
+  --bg: #F9FBFA; --surface: #FFFFFF; --inset: #F1F5F3; --border: #D5DDD9;
+  --fg: #001E2B; --muted: #4B5D66;
+  --accent: #00684A; --on-accent: #FFFFFF; --spring: #00A35C;
+  --new-bg: #D9F8E8; --new-mark: #00684A;
+  --good-bg: #E3FCF7; --good-fg: #00684A;
+  --warn-bg: #FEF2C8; --warn-fg: #7A4200;
+  --crit-bg: #FFE5DF; --crit-fg: #970606;
+  --kw: #B0206F; --str: #0B6B43; --num: #9A4D00; --key: #1254B7; --com: #5C6C75;
+  --sans: "Lexend Deca", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Source Code Pro", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #001E2B; --surface: #0C2B39; --inset: #011822; --border: #24424F;
+    --fg: #F0F5F3; --muted: #A9B8BD;
+    --accent: #00ED64; --on-accent: #001E2B; --spring: #00ED64;
+    --new-bg: #0B4034; --new-mark: #00ED64;
+    --good-bg: #023430; --good-fg: #71F6BA;
+    --warn-bg: #4A3200; --warn-fg: #FFE08A;
+    --crit-bg: #5B1410; --crit-fg: #FFB3AA;
+    --kw: #FF8ECB; --str: #5FE39A; --num: #FFC46B; --key: #7CC7FF; --com: #8FA3AB;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #001E2B; --surface: #0C2B39; --inset: #011822; --border: #24424F;
+  --fg: #F0F5F3; --muted: #A9B8BD;
+  --accent: #00ED64; --on-accent: #001E2B; --spring: #00ED64;
+  --new-bg: #0B4034; --new-mark: #00ED64;
+  --good-bg: #023430; --good-fg: #71F6BA;
+  --warn-bg: #4A3200; --warn-fg: #FFE08A;
+  --crit-bg: #5B1410; --crit-fg: #FFB3AA;
+  --kw: #FF8ECB; --str: #5FE39A; --num: #FFC46B; --key: #7CC7FF; --com: #8FA3AB;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 16px; line-height: 1.5; font-weight: 400; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 3px solid var(--spring); outline-offset: 2px; }
+a { color: var(--accent); text-underline-offset: 3px; }
+
+.wrap { max-width: 1600px; margin: 0 auto; padding-inline: clamp(16px, 2.4vw, 40px); padding-block: 0 48px; display: flex; flex-direction: column; gap: 20px; }
+
+/* Top bar */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding-block: 14px; background: var(--bg); border-bottom: 1px solid var(--border); }
+@media (min-width: 900px) { .top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; } }
+.top h1 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.top h1 span { color: var(--accent); }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0 auto; padding: 0; }
+.steps button { display: flex; align-items: center; gap: 8px; padding: 7px 14px 7px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: 14.5px; font-weight: 500; color: var(--muted); }
+.steps .n { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--inset); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.steps button:hover { color: var(--fg); border-color: var(--accent); }
+.steps button[aria-current="step"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.steps button[aria-current="step"] .n { background: var(--on-accent); color: var(--accent); }
+.ghost { padding: 7px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 14px; font-weight: 500; }
+.ghost:hover:not(:disabled) { border-color: var(--accent); }
+.ghost:disabled { opacity: .4; cursor: default; }
+
+/* Stage intro */
+.intro { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 32px; }
+.intro .txt { min-width: 0; flex: 1 1 520px; }
+.eyebrow { font-size: 13px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin: 0 0 4px; }
+.intro h2 { font-size: clamp(26px, 2.6vw, 36px); font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8px; text-wrap: balance; }
+.intro p.sum { font-size: 18px; font-weight: 300; color: var(--muted); margin: 0; max-width: 68ch; }
+.ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { padding: 8px 16px; border: 0; background: transparent; font-size: 14.5px; font-weight: 500; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"], .seg button[aria-selected="true"] { background: var(--accent); color: var(--on-accent); }
+.seg-label { font-size: 14px; color: var(--muted); }
+
+/* Comparison grid */
+.cmp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 20px; align-items: start; }
+@media (max-width: 880px) { .cmp { grid-template-columns: minmax(0, 1fr); } }
+.span { grid-column: 1 / -1; }
+.panel { min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.panel.mdb { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.phead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.side { font-size: 18px; font-weight: 600; margin: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.side small { font-size: 13px; font-weight: 400; color: var(--muted); }
+.mdb .side { color: var(--accent); }
+.pill { font-size: 13.5px; font-weight: 600; padding: 4px 12px; border-radius: 999px; white-space: nowrap; }
+.pill.good { background: var(--good-bg); color: var(--good-fg); }
+.pill.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.pill.crit { background: var(--crit-bg); color: var(--crit-fg); }
+
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 520px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stat { background: var(--inset); border-radius: 8px; padding: 8px 12px; }
+.stat b { display: flex; align-items: baseline; gap: 6px; font-size: 24px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.stat .delta { font-size: 12.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--warn-bg); color: var(--warn-fg); }
+.stat span.l { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.3; }
+
+/* SQL tables */
+.tbl { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tbl.new { border-color: var(--new-mark); }
+.tname { display: flex; align-items: center; gap: 10px; padding: 7px 12px; background: var(--inset); font-family: var(--mono); font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--border); }
+.badge { font-family: var(--sans); font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 1px 8px; border-radius: 999px; background: var(--new-bg); color: var(--new-mark); }
+.tname .rows { margin-left: auto; font-family: var(--sans); font-weight: 400; font-size: 12.5px; color: var(--muted); }
+.rec { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.kv { display: flex; justify-content: space-between; gap: 12px; padding: 5px 12px; font-family: var(--mono); font-size: 13.5px; border-bottom: 1px solid var(--border); min-width: 0; }
+.kv .k { color: var(--muted); white-space: nowrap; }
+.kv .v { text-align: right; overflow-wrap: anywhere; }
+.kv.new { background: var(--new-bg); }
+.kv.new .k { color: var(--new-mark); font-weight: 600; }
+.kv.gone .k, .kv.gone .v { text-decoration: line-through; color: var(--crit-fg); }
+.nul { font-style: italic; padding: 0 6px; border-radius: 4px; background: var(--warn-bg); color: var(--warn-fg); }
+.scroll { overflow-x: auto; }
+table.g { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+table.g th, table.g td { text-align: left; padding: 5px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.g th { color: var(--muted); font-weight: 600; }
+table.g tr:last-child td { border-bottom: 0; }
+.empty { padding: 8px 12px; font-size: 13.5px; color: var(--muted); }
+.tables { display: flex; flex-direction: column; gap: 10px; }
+.also { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13.5px; color: var(--muted); }
+.also code { font-family: var(--mono); font-size: 13px; padding: 2px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--fg); background: var(--inset); }
+
+/* Code */
+pre.code { margin: 0; background: var(--inset); border: 1px solid var(--border); border-radius: 8px; padding: 12px 0; overflow-x: auto; font-family: var(--mono); font-size: 14px; line-height: 1.6; tab-size: 2; }
+pre.code code { display: inline-block; min-width: 100%; font-family: inherit; }
+.ln { display: block; padding: 0 14px 0 26px; position: relative; white-space: pre; }
+.ln.new { background: var(--new-bg); }
+.ln.new::before { content: "+"; position: absolute; left: 9px; color: var(--new-mark); font-weight: 600; }
+.t-kw { color: var(--kw); font-weight: 600; } .t-str { color: var(--str); } .t-num { color: var(--num); } .t-key { color: var(--key); } .t-com { color: var(--com); font-style: italic; }
+.doclabel { font-size: 13.5px; font-weight: 500; color: var(--muted); margin: 0 0 -6px; }
+.note { font-size: 15px; color: var(--muted); margin: 0; max-width: 70ch; }
+.note b { color: var(--fg); font-weight: 600; }
+.res { font-size: 13.5px; font-weight: 600; color: var(--muted); margin: 0 0 -6px; }
+.qtitle { font-size: 16px; font-weight: 600; margin: 0; }
+.legend { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); }
+.legend i { width: 18px; height: 14px; border-radius: 3px; background: var(--new-bg); border: 1px solid var(--new-mark); }
+.qbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; margin-top: 8px; }
+.qbar h3 { font-size: 20px; font-weight: 600; margin: 0; }
+
+footer { border-top: 1px solid var(--border); padding-top: 16px; font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 20px; }
+footer .hint { margin-left: auto; }
+kbd { font-family: var(--mono); font-size: 12.5px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>Schema evolution: SQL vs <span>MongoDB</span></h1>
+    <ol class="steps" id="steps" aria-label="Stages"></ol>
+    <button class="ghost" id="themeBtn" type="button">Dark mode</button>
+  </header>
+
+  <section class="intro" aria-live="polite">
+    <div class="txt">
+      <p class="eyebrow" id="eyebrow"></p>
+      <h2 id="stageTitle"></h2>
+      <p class="sum" id="stageSum"></p>
+    </div>
+    <div class="ctl">
+      <span class="seg-label" id="typeLabel" hidden>Customer type</span>
+      <div class="seg" id="typeSeg" role="group" aria-labelledby="typeLabel" hidden>
+        <button type="button" data-type="retail">Retail</button>
+        <button type="button" data-type="wealth">Wealth</button>
+        <button type="button" data-type="corporate">Corporate</button>
+      </div>
+      <button class="ghost" id="prevBtn" type="button">Back</button>
+      <button class="ghost" id="nextBtn" type="button">Next stage</button>
+    </div>
+  </section>
+
+  <main class="cmp">
+    <section class="panel" id="sqlData" aria-label="SQL data model"></section>
+    <section class="panel mdb" id="mdbData" aria-label="MongoDB document"></section>
+
+    <div class="span qbar">
+      <h3>Working with the data</h3>
+      <div class="legend"><i></i> Changed since the previous stage</div>
+      <div class="seg" id="tabs" role="tablist" aria-label="Operation">
+        <button type="button" role="tab" data-tab="read">Read</button>
+        <button type="button" role="tab" data-tab="write">Write</button>
+        <button type="button" role="tab" data-tab="schema">Schema change</button>
+      </div>
+    </div>
+
+    <section class="panel" id="sqlQuery" aria-label="SQL query"></section>
+    <section class="panel mdb" id="mdbQuery" aria-label="MongoDB query"></section>
+  </main>
+
+  <footer>
+    <span>MongoDB documentation:</span>
+    <a href="https://www.mongodb.com/docs/manual/data-modeling/" target="_blank" rel="noopener">Data modeling</a>
+    <a href="https://www.mongodb.com/docs/manual/data-modeling/embedding/" target="_blank" rel="noopener">Embedded data</a>
+    <a href="https://www.mongodb.com/docs/manual/data-modeling/design-patterns/polymorphic-data/polymorphic-schema-pattern/" target="_blank" rel="noopener">Polymorphic pattern</a>
+    <a href="https://www.mongodb.com/docs/manual/data-modeling/design-patterns/data-versioning/schema-versioning/" target="_blank" rel="noopener">Schema Versioning pattern</a>
+    <a href="https://www.mongodb.com/docs/manual/core/schema-validation/" target="_blank" rel="noopener">Schema validation</a>
+    <span class="hint"><kbd>&larr;</kbd> <kbd>&rarr;</kbd> change stage &nbsp; <kbd>R</kbd> <kbd>W</kbd> <kbd>S</kbd> change query</span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var state = { stage: 0, tab: "read", type: "retail" };
+
+  var STAGES = [
+    { label: "Basic profile", title: "A basic customer profile",
+      sum: "One table, one document. Both models are equally simple at this point.",
+      sqlPill: ["Simple", "good"], mdbPill: ["Simple", "good"] },
+    { label: "More fields", title: "The profile gains more fields",
+      sum: "Date of birth, loyalty tier and marketing consent are added. SQL handles this well with a single ALTER TABLE. MongoDB needs no DDL at all.",
+      sqlPill: ["Still in good shape", "good"], mdbPill: ["No DDL needed", "good"] },
+    { label: "Child data", title: "Addresses, preferences and interests arrive",
+      sum: "SQL spreads one profile across four tables and joins them back together. MongoDB embeds the same data as a sub-document and arrays.",
+      sqlPill: ["4 tables, 3 joins", "warn"], mdbPill: ["Still one document", "good"] },
+    { label: "Customer types", title: "The CRM now tracks three customer types",
+      sum: "Retail, wealth and corporate customers need different fields. SQL carries every type's columns on every row. MongoDB stores only the fields that apply.",
+      sqlPill: ["Sparse rows, 5 joins", "warn"], mdbPill: ["Only the fields that apply", "good"] },
+    { label: "New field version", title: "A field changes shape",
+      sum: "A single phone number becomes a list of contacts. SQL needs a coordinated data migration. MongoDB lets both versions live side by side.",
+      sqlPill: ["Migration project", "crit"], mdbPill: ["v1 and v2 coexist", "good"] }
+  ];
+
+  var SQL_STATS = { tables: [1, 1, 4, 6, 7], joins: [0, 0, 3, 5, 6], stmts: [1, 2, 5, 9, 12] };
+  var NULLS = { retail: 6, wealth: 4, corporate: 7 };
+
+  var CUST = {
+    retail: { customer_id: 1001, customer_type: "retail", first_name: "Elena", last_name: "Marsh", email: "elena.marsh@example.com", phone: "+65 8123 4567", created_at: "2024-03-14", date_of_birth: "1988-07-02", loyalty_tier: "Gold", marketing_opt_in: "TRUE", risk_profile: null, aum_usd: null, relationship_mgr: null, company_name: null, registration_no: null, industry: null },
+    wealth: { customer_id: 1002, customer_type: "wealth", first_name: "Rohan", last_name: "Iyer", email: "rohan.iyer@example.com", phone: "+65 9234 5678", created_at: "2023-11-02", date_of_birth: "1975-01-19", loyalty_tier: null, marketing_opt_in: "FALSE", risk_profile: "Balanced", aum_usd: "2400000.00", relationship_mgr: "J. Tan", company_name: null, registration_no: null, industry: null },
+    corporate: { customer_id: 1003, customer_type: "corporate", first_name: null, last_name: null, email: "ops@harbourline.example", phone: "+65 6555 0142", created_at: "2022-06-20", date_of_birth: null, loyalty_tier: null, marketing_opt_in: "FALSE", risk_profile: null, aum_usd: null, relationship_mgr: null, company_name: "Harbourline Logistics", registration_no: "201912345K", industry: "Logistics" }
+  };
+  // [column, first stage it exists in (1-based)]
+  var COLS = [["customer_id", 1], ["customer_type", 4], ["first_name", 1], ["last_name", 1], ["email", 1], ["phone", 1], ["created_at", 1], ["date_of_birth", 2], ["loyalty_tier", 2], ["marketing_opt_in", 2], ["risk_profile", 4], ["aum_usd", 4], ["relationship_mgr", 4], ["company_name", 4], ["registration_no", 4], ["industry", 4]];
+
+  var T_ADDR = { name: "addresses", cols: ["address_id", "customer_id", "type", "street", "city", "postal_code"], rows: [[1, 1001, "home", "12 Orchard Rd", "Singapore", "238841"], [2, 1001, "work", "8 Marina Blvd", "Singapore", "018981"]] };
+  var T_PREF = { name: "customer_preferences", cols: ["customer_id", "language", "channel"], rows: [[1001, "en", "email"]] };
+  var T_INT = { name: "customer_interests", cols: ["customer_id", "interest"], rows: [[1001, "travel"], [1001, "investing"], [1001, "dining"]] };
+  var CHILD = {
+    retail: { addr: T_ADDR.rows, pref: T_PREF.rows, int: T_INT.rows },
+    wealth: { addr: [[3, 1002, "home", "5 Nassim Rd", "Singapore", "258372"]], pref: [[1002, "en", "phone"]], int: [[1002, "investing"], [1002, "golf"]] },
+    corporate: { addr: [[4, 1003, "office", "30 Tuas Ave 2", "Singapore", "639461"]], pref: [], int: [] }
+  };
+  var T_CONTACT = { name: "customer_contacts", cols: ["contact_id", "customer_id", "type", "value", "is_primary"], rows: [[1, 1001, "mobile", "+65 8123 4567", "TRUE"], [2, 1001, "work", "+65 6555 0199", "FALSE"]] };
+
+  /* ---------- content per stage ---------- */
+  var MDB_DOC = [
+`{
+  _id: 1001,
+  firstName: "Elena",
+  lastName: "Marsh",
+  email: "elena.marsh@example.com",
+  phone: "+65 8123 4567",
+  createdAt: ISODate("2024-03-14")
+}`,
+`{
+  _id: 1001,
+  firstName: "Elena",
+  lastName: "Marsh",
+  email: "elena.marsh@example.com",
+  phone: "+65 8123 4567",
+  createdAt: ISODate("2024-03-14"),
++  dateOfBirth: ISODate("1988-07-02"),
++  loyaltyTier: "Gold",
++  marketingOptIn: true
+}`,
+`{
+  _id: 1001,
+  firstName: "Elena",
+  lastName: "Marsh",
+  email: "elena.marsh@example.com",
+  phone: "+65 8123 4567",
+  createdAt: ISODate("2024-03-14"),
+  dateOfBirth: ISODate("1988-07-02"),
+  loyaltyTier: "Gold",
+  marketingOptIn: true,
++  addresses: [
++    { type: "home", street: "12 Orchard Rd",
++      city: "Singapore", postalCode: "238841" },
++    { type: "work", street: "8 Marina Blvd",
++      city: "Singapore", postalCode: "018981" }
++  ],
++  preferences: { language: "en", channel: "email" },
++  interests: ["travel", "investing", "dining"]
+}`
+  ];
+  var MDB_TYPED = {
+    retail:
+`{
+  _id: 1001,
++  type: "retail",
+  firstName: "Elena",
+  lastName: "Marsh",
+  email: "elena.marsh@example.com",
+  phone: "+65 8123 4567",
+  dateOfBirth: ISODate("1988-07-02"),
+  loyaltyTier: "Gold",
+  marketingOptIn: true,
+  addresses: [
+    { type: "home", street: "12 Orchard Rd",
+      city: "Singapore", postalCode: "238841" },
+    { type: "work", street: "8 Marina Blvd",
+      city: "Singapore", postalCode: "018981" }
+  ],
+  preferences: { language: "en", channel: "email" },
+  interests: ["travel", "investing", "dining"]
+}`,
+    wealth:
+`{
+  _id: 1002,
++  type: "wealth",
+  firstName: "Rohan",
+  lastName: "Iyer",
+  email: "rohan.iyer@example.com",
+  phone: "+65 9234 5678",
+  dateOfBirth: ISODate("1975-01-19"),
++  riskProfile: "Balanced",
++  aumUsd: 2400000,
++  relationshipManager: "J. Tan",
++  portfolios: [
++    { name: "Growth", valueUsd: 1500000 },
++    { name: "Income", valueUsd: 900000 }
++  ],
+  addresses: [
+    { type: "home", street: "5 Nassim Rd",
+      city: "Singapore", postalCode: "258372" }
+  ],
+  preferences: { language: "en", channel: "phone" },
+  interests: ["investing", "golf"]
+}`,
+    corporate:
+`{
+  _id: 1003,
++  type: "corporate",
++  companyName: "Harbourline Logistics",
++  registrationNo: "201912345K",
++  industry: "Logistics",
+  email: "ops@harbourline.example",
+  phone: "+65 6555 0142",
++  signatories: [
++    { name: "Li Wei Chen", role: "CFO" },
++    { name: "Sara Holm", role: "Director" }
++  ],
+  addresses: [
+    { type: "office", street: "30 Tuas Ave 2",
+      city: "Singapore", postalCode: "639461" }
+  ]
+}`
+  };
+  var MDB_V2 =
+`{
+  _id: 1001,
++  schemaVersion: 2,
+  type: "retail",
+  firstName: "Elena",
+  lastName: "Marsh",
+  email: "elena.marsh@example.com",
++  contacts: [
++    { type: "mobile", value: "+65 8123 4567", primary: true },
++    { type: "work", value: "+65 6555 0199" }
++  ],
+  loyaltyTier: "Gold",
+  addresses: [ /* 2 items */ ],
+  preferences: { language: "en", channel: "email" },
+  interests: ["travel", "investing", "dining"]
+}`;
+  var MDB_V1 =
+`{
+  _id: 1004,
+  type: "retail",
+  firstName: "Tomas",
+  lastName: "Reyes",
+  email: "tomas.reyes@example.com",
+  phone: "+65 9000 1122",
+  loyaltyTier: "Silver"
+}`;
+
+  function queries(stage, type) {
+    var id = stage === 3 ? CUST[type].customer_id : 1001;
+    var find = "db.customers.findOne({ _id: " + id + " })";
+    var Q = [
+      /* ---- Stage 1 ---- */
+      { read: {
+          title: "Fetch the full customer profile",
+          sql: { code: "SELECT *\nFROM customers\nWHERE customer_id = 1001;", res: "Returns 1 row" },
+          mdb: { code: find, res: "Returns 1 document" } },
+        write: {
+          title: "Create the customer",
+          sql: { code: "INSERT INTO customers\n  (customer_id, first_name, last_name, email, phone)\nVALUES\n  (1001, 'Elena', 'Marsh',\n   'elena.marsh@example.com', '+65 8123 4567');" },
+          mdb: { code: 'db.customers.insertOne({\n  _id: 1001,\n  firstName: "Elena",\n  lastName: "Marsh",\n  email: "elena.marsh@example.com",\n  phone: "+65 8123 4567",\n  createdAt: new Date()\n})' } },
+        schema: {
+          title: "Set up the structure",
+          sql: { code: "CREATE TABLE customers (\n  customer_id INT PRIMARY KEY,\n  first_name  VARCHAR(50) NOT NULL,\n  last_name   VARCHAR(50) NOT NULL,\n  email       VARCHAR(120) NOT NULL,\n  phone       VARCHAR(30),\n  created_at  TIMESTAMP DEFAULT NOW()\n);", note: "The table must exist before the first row is written." },
+          mdb: { code: "// Nothing to run.\n// The collection is created on the first insert.", note: "The document has the same shape as the object in the application code." } } },
+
+      /* ---- Stage 2 ---- */
+      { read: {
+          title: "Fetch the full customer profile",
+          sql: { code: "SELECT *\nFROM customers\nWHERE customer_id = 1001;", res: "Returns 1 row", note: "Unchanged. The new columns come back automatically." },
+          mdb: { code: find, res: "Returns 1 document", note: "Unchanged." } },
+        write: {
+          title: "Fill in the new fields",
+          sql: { code: "+UPDATE customers\n+SET date_of_birth = '1988-07-02',\n+    loyalty_tier = 'Gold',\n+    marketing_opt_in = TRUE\n+WHERE customer_id = 1001;" },
+          mdb: { code: '+db.customers.updateOne(\n+  { _id: 1001 },\n+  { $set: {\n+      dateOfBirth: ISODate("1988-07-02"),\n+      loyaltyTier: "Gold",\n+      marketingOptIn: true\n+  } }\n+)' } },
+        schema: {
+          title: "Get from stage 1 to stage 2",
+          sql: { code: "+ALTER TABLE customers\n+  ADD COLUMN date_of_birth DATE,\n+  ADD COLUMN loyalty_tier VARCHAR(20),\n+  ADD COLUMN marketing_opt_in BOOLEAN DEFAULT FALSE;", note: "One statement, and SQL copes well. Existing rows hold NULL for date_of_birth and loyalty_tier until they are updated." },
+          mdb: { code: '// No DDL. Documents without the new fields stay valid.\n\n// Optional: enforce rules with schema validation\ndb.runCommand({\n  collMod: "customers",\n  validator: { $jsonSchema: {\n    required: ["firstName", "lastName", "email"],\n    properties: {\n      loyaltyTier: { enum: ["Silver", "Gold", "Platinum"] }\n    }\n  } }\n})', note: "Flexible does not mean unmanaged. <b>Schema validation</b> applies rules where you want them." } } },
+
+      /* ---- Stage 3 ---- */
+      { read: {
+          title: "Fetch the full customer profile",
+          sql: { code: "SELECT c.*, a.type, a.street, a.city, a.postal_code,\n       p.language, p.channel, i.interest\nFROM customers c\n+LEFT JOIN addresses a USING (customer_id)\n+LEFT JOIN customer_preferences p USING (customer_id)\n+LEFT JOIN customer_interests i USING (customer_id)\nWHERE c.customer_id = 1001;",
+                 res: "Returns 6 rows for 1 customer",
+                 grid: { cols: ["customer_id", "first_name", "a.type", "i.interest"], rows: [[1001, "Elena", "home", "travel"], [1001, "Elena", "home", "investing"], [1001, "Elena", "home", "dining"], [1001, "Elena", "work", "travel"], [1001, "Elena", "work", "investing"], [1001, "Elena", "work", "dining"]] },
+                 note: "2 addresses &times; 3 interests = 6 rows. The application removes the duplicates, or runs several queries instead." },
+          mdb: { code: find, res: "Returns 1 document", note: "Unchanged. The addresses, preferences and interests come back inside the document." } },
+        write: {
+          title: "Create a full profile",
+          sql: { code: "+BEGIN;\nINSERT INTO customers (customer_id, first_name, last_name, email)\n  VALUES (1001, 'Elena', 'Marsh', 'elena.marsh@example.com');\n+INSERT INTO addresses (customer_id, type, street, city, postal_code)\n+  VALUES (1001, 'home', '12 Orchard Rd', 'Singapore', '238841'),\n+         (1001, 'work', '8 Marina Blvd', 'Singapore', '018981');\n+INSERT INTO customer_preferences (customer_id, language, channel)\n+  VALUES (1001, 'en', 'email');\n+INSERT INTO customer_interests (customer_id, interest)\n+  VALUES (1001, 'travel'), (1001, 'investing'), (1001, 'dining');\n+COMMIT;", note: "Four inserts across four tables, wrapped in a transaction so the profile is never half written." },
+          mdb: { code: 'db.customers.insertOne({\n  _id: 1001,\n  firstName: "Elena",\n  lastName: "Marsh",\n  email: "elena.marsh@example.com",\n+  addresses: [ { type: "home", city: "Singapore" /* ... */ } ],\n+  preferences: { language: "en", channel: "email" },\n+  interests: ["travel", "investing", "dining"]\n})\n\n// Later: add one more address\n+db.customers.updateOne(\n+  { _id: 1001 },\n+  { $push: { addresses: { type: "billing", city: "Singapore" } } }\n+)', note: "A write to a single document is <b>atomic</b>. No multi-statement transaction is needed." } },
+        schema: {
+          title: "Get from stage 2 to stage 3",
+          sql: { code: "+CREATE TABLE addresses (\n+  address_id  SERIAL PRIMARY KEY,\n+  customer_id INT REFERENCES customers,\n+  type VARCHAR(20), street VARCHAR(120),\n+  city VARCHAR(60), postal_code VARCHAR(12)\n+);\n+CREATE TABLE customer_preferences (\n+  customer_id INT PRIMARY KEY REFERENCES customers,\n+  language VARCHAR(5), channel VARCHAR(20)\n+);\n+CREATE TABLE customer_interests (\n+  customer_id INT REFERENCES customers,\n+  interest VARCHAR(40),\n+  PRIMARY KEY (customer_id, interest)\n+);", note: "Three new tables, each with a foreign key back to customers." },
+          mdb: { code: '// No DDL. Add the embedded data to the document.\n+db.customers.updateOne(\n+  { _id: 1001 },\n+  { $set: {\n+      addresses: [ /* 2 addresses */ ],\n+      preferences: { language: "en", channel: "email" },\n+      interests: ["travel", "investing", "dining"]\n+  } }\n+)', note: "Embed data that is read together and bounded in size. Data that grows without limit belongs in its own collection, linked by reference." } } },
+
+      /* ---- Stage 4 ---- */
+      { read: {
+          title: "Fetch the full customer profile",
+          sql: { code: "SELECT c.*, a.*, p.*, i.interest,\n+       wp.name, wp.value_usd, cs.name, cs.role\nFROM customers c\nLEFT JOIN addresses a USING (customer_id)\nLEFT JOIN customer_preferences p USING (customer_id)\nLEFT JOIN customer_interests i USING (customer_id)\n+LEFT JOIN wealth_portfolios wp USING (customer_id)\n+LEFT JOIN corporate_signatories cs USING (customer_id)\nWHERE c.customer_id = " + id + ";", note: "Every row carries every type's columns. The application checks customer_type to know which ones to read and which to ignore." },
+          mdb: { code: find + '\n\n// The type field is also an ordinary filter\n+db.customers.find({\n+  type: "wealth",\n+  aumUsd: { $gte: 1000000 }\n+})', res: "Returns 1 document, with only this type's fields", note: "Unchanged. The same findOne returns a different shape per customer type." } },
+        write: {
+          title: "Create a wealth customer",
+          sql: { code: "BEGIN;\nINSERT INTO customers\n+  (customer_id, customer_type, first_name, last_name, email,\n+   risk_profile, aum_usd, relationship_mgr)\nVALUES\n+  (1002, 'wealth', 'Rohan', 'Iyer', 'rohan.iyer@example.com',\n+   'Balanced', 2400000.00, 'J. Tan');\n-- company_name, registration_no, industry, loyalty_tier stay NULL\n+INSERT INTO wealth_portfolios (customer_id, name, value_usd)\n+  VALUES (1002, 'Growth', 1500000.00), (1002, 'Income', 900000.00);\nCOMMIT;", note: "Each customer type needs its own insert logic, covering a different set of columns and tables." },
+          mdb: { code: 'db.customers.insertOne({\n  _id: 1002,\n+  type: "wealth",\n  firstName: "Rohan",\n  lastName: "Iyer",\n  email: "rohan.iyer@example.com",\n+  riskProfile: "Balanced",\n+  aumUsd: 2400000,\n+  relationshipManager: "J. Tan",\n+  portfolios: [\n+    { name: "Growth", valueUsd: 1500000 },\n+    { name: "Income", valueUsd: 900000 }\n+  ]\n})', note: "The document holds the wealth fields and nothing else. There are no placeholders to leave empty." } },
+        schema: {
+          title: "Get from stage 3 to stage 4",
+          sql: { code: "+ALTER TABLE customers\n+  ADD COLUMN customer_type VARCHAR(20)\n+    NOT NULL DEFAULT 'retail',\n+  ADD COLUMN risk_profile VARCHAR(20),      -- wealth only\n+  ADD COLUMN aum_usd DECIMAL(18,2),         -- wealth only\n+  ADD COLUMN relationship_mgr VARCHAR(60),  -- wealth only\n+  ADD COLUMN company_name VARCHAR(120),     -- corporate only\n+  ADD COLUMN registration_no VARCHAR(20),   -- corporate only\n+  ADD COLUMN industry VARCHAR(40);          -- corporate only\n+ALTER TABLE customers  -- a company has no first name\n+  ALTER COLUMN first_name DROP NOT NULL,\n+  ALTER COLUMN last_name DROP NOT NULL;\n+CREATE TABLE wealth_portfolios (\n+  portfolio_id SERIAL PRIMARY KEY,\n+  customer_id INT REFERENCES customers,\n+  name VARCHAR(60), value_usd DECIMAL(18,2)\n+);\n+CREATE TABLE corporate_signatories (\n+  signatory_id SERIAL PRIMARY KEY,\n+  customer_id INT REFERENCES customers,\n+  name VARCHAR(80), role VARCHAR(40)\n+);", note: "The alternative is one table per customer type. That removes the NULL columns but adds another join for each type." },
+          mdb: { code: '// No DDL. Tag the existing documents with a type.\n+db.customers.updateMany(\n+  { type: { $exists: false } },\n+  { $set: { type: "retail" } }\n+)\n\n// Optional: index the type field\n+db.customers.createIndex({ type: 1 })', note: "This is the <b>polymorphic pattern</b>. A new customer type is a new document shape in the same collection." } } },
+
+      /* ---- Stage 5 ---- */
+      { read: {
+          title: "Fetch the full customer profile",
+          sql: { code: "SELECT c.*, a.*, p.*, i.interest, wp.*, cs.*,\n+       cc.type, cc.value, cc.is_primary\nFROM customers c\nLEFT JOIN addresses a USING (customer_id)\nLEFT JOIN customer_preferences p USING (customer_id)\nLEFT JOIN customer_interests i USING (customer_id)\nLEFT JOIN wealth_portfolios wp USING (customer_id)\nLEFT JOIN corporate_signatories cs USING (customer_id)\n+LEFT JOIN customer_contacts cc USING (customer_id)\nWHERE c.customer_id = 1001;", res: "Returns 12 rows for 1 customer", note: "2 addresses &times; 3 interests &times; 2 contacts = 12 rows. This query only works after the backfill has finished." },
+          mdb: { code: find + '\n\n// Application code reads both versions\n+function getContacts(doc) {\n+  if ((doc.schemaVersion ?? 1) === 1) {\n+    return [{ type: "mobile", value: doc.phone, primary: true }];\n+  }\n+  return doc.contacts;\n+}', res: "Returns 1 document, v1 or v2", note: "The query is unchanged. A small branch on <b>schemaVersion</b> handles both shapes." } },
+        write: {
+          title: "Change a customer's mobile number",
+          sql: { code: "BEGIN;\n-- old readers still use customers.phone\nUPDATE customers\n  SET phone = '+65 8777 0000'\n  WHERE customer_id = 1004;\n+-- new readers use customer_contacts\n+UPDATE customer_contacts\n+  SET value = '+65 8777 0000'\n+  WHERE customer_id = 1004 AND type = 'mobile';\nCOMMIT;", note: "Every writer must <b>dual write</b> to the old column and the new table until the cutover is complete." },
+          mdb: { code: 'db.customers.updateOne(\n  { _id: 1004 },\n  {\n+    $set: {\n+      schemaVersion: 2,\n+      contacts: [\n+        { type: "mobile", value: "+65 8777 0000", primary: true }\n+      ]\n+    },\n+    $unset: { phone: "" }\n  }\n)', note: "The v1 document is upgraded to v2 in the same write that changes the number. No downtime and no batch job." } },
+        schema: {
+          title: "Get from stage 4 to stage 5",
+          sql: { code: "+-- 1. Create the new table\n+CREATE TABLE customer_contacts (\n+  contact_id  SERIAL PRIMARY KEY,\n+  customer_id INT REFERENCES customers,\n+  type VARCHAR(20), value VARCHAR(30),\n+  is_primary BOOLEAN DEFAULT FALSE\n+);\n+-- 2. Backfill every existing customer\n+INSERT INTO customer_contacts\n+  (customer_id, type, value, is_primary)\n+SELECT customer_id, 'mobile', phone, TRUE\n+FROM customers WHERE phone IS NOT NULL;\n+-- 3. Deploy application code that writes to both places\n+-- 4. Verify the data, then switch all readers over\n+-- 5. Remove the old column\n+ALTER TABLE customers DROP COLUMN phone;", note: "Five ordered steps across database and application teams. On a large table the backfill needs batching and a rollback plan." },
+          mdb: { code: '// No migration window. New code simply writes v2.\n\n// Optional: upgrade the remaining v1 documents\n// in the background, at your own pace\n+db.customers.updateMany(\n+  { schemaVersion: { $exists: false }, phone: { $exists: true } },\n+  [\n+    { $set: {\n+        schemaVersion: 2,\n+        contacts: [\n+          { type: "mobile", value: "$phone", primary: true }\n+        ]\n+    } },\n+    { $unset: "phone" }\n+  ]\n+)', note: "This is the <b>Schema Versioning pattern</b>. Old and new documents share the collection, so the upgrade can be gradual or never forced at all." } } }
+    ];
+    return Q[stage];
+  }
+
+  /* ---------- rendering helpers ---------- */
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  var RE_SQL = /(--.*$)|('(?:[^']|'')*')|\b(SELECT|FROM|WHERE|LEFT|JOIN|USING|ON|INSERT|INTO|VALUES|UPDATE|SET|ALTER|TABLE|ADD|COLUMN|DROP|CREATE|PRIMARY|KEY|REFERENCES|NOT|NULL|DEFAULT|BEGIN|COMMIT|AND|IS|TRUE|FALSE|INT|SERIAL|VARCHAR|DATE|BOOLEAN|DECIMAL|TIMESTAMP)\b|\b(\d+(?:\.\d+)?)\b/g;
+  var RE_JS = /(\/\/.*$|\/\*.*?\*\/)|("(?:[^"\\]|\\.)*")|\b(function|return|if|else|true|false|new)\b|([A-Za-z_$][\w$]*)(?=\s*:)|\b(\d+(?:\.\d+)?)\b/g;
+  function hl(line, lang) {
+    var e = esc(line);
+    if (lang === "sql") return e.replace(RE_SQL, function (m, c, s, k, n) {
+      return '<span class="t-' + (c ? "com" : s ? "str" : k ? "kw" : "num") + '">' + m + "</span>";
+    });
+    return e.replace(RE_JS, function (m, c, s, k, key, n) {
+      return '<span class="t-' + (c ? "com" : s ? "str" : k ? "kw" : key ? "key" : "num") + '">' + m + "</span>";
+    });
+  }
+  function code(str, lang) {
+    return '<pre class="code" tabindex="0"><code>' + str.split("\n").map(function (l) {
+      var isNew = l.charAt(0) === "+";
+      var t = isNew ? l.slice(1) : l;
+      return '<span class="ln' + (isNew ? " new" : "") + '">' + (hl(t, lang) || " ") + "\n</span>";
+    }).join("") + "</code></pre>";
+  }
+  function val(v) { return v === null ? '<span class="nul">NULL</span>' : esc(v); }
+  function grid(t, isNew) {
+    var body = t.rows.length
+      ? '<div class="scroll"><table class="g"><thead><tr>' + t.cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+        t.rows.map(function (r) { return "<tr>" + r.map(function (c) { return "<td>" + val(c) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div>"
+      : '<div class="empty">No rows for this customer. The table is still joined on every read.</div>';
+    return '<div class="tbl' + (isNew ? " new" : "") + '"><div class="tname">' + esc(t.name) + (isNew ? '<span class="badge">New</span>' : "") +
+      '<span class="rows">' + t.rows.length + (t.rows.length === 1 ? " row" : " rows") + "</span></div>" + body + "</div>";
+  }
+  function record(stage, type) {
+    var c = CUST[type], n = stage + 1;
+    var kvs = COLS.filter(function (col) { return col[1] <= n; }).map(function (col) {
+      var cls = col[1] === n && n > 1 ? " new" : "";
+      if (n === 5 && col[0] === "phone") cls = " gone";
+      return '<div class="kv' + cls + '"><span class="k">' + col[0] + '</span><span class="v">' + val(c[col[0]]) + "</span></div>";
+    }).join("");
+    return '<div class="tbl"><div class="tname">customers<span class="rows">row ' + c.customer_id + '</span></div><div class="rec">' + kvs + "</div></div>";
+  }
+  function stat(value, label, prev) {
+    var d = prev !== undefined && value > prev ? '<span class="delta">+' + (value - prev) + "</span>" : "";
+    return '<div class="stat"><b>' + value + d + '</b><span class="l">' + label + "</span></div>";
+  }
+  function head(name, sub, pill) {
+    return '<div class="phead"><h3 class="side">' + name + " <small>" + sub + '</small></h3><span class="pill ' + pill[1] + '">' + pill[0] + "</span></div>";
+  }
+
+  function renderData() {
+    var s = state.stage, type = (s === 3) ? state.type : "retail", S = STAGES[s];
+    var nulls = s < 3 ? 0 : NULLS[type], prevNulls = s === 3 ? 0 : undefined;
+    var p = s > 0 ? s - 1 : -1;
+    var sql = head("SQL", "relational tables", S.sqlPill) + '<div class="stats">' +
+      stat(SQL_STATS.tables[s], "Tables", SQL_STATS.tables[p]) +
+      stat(SQL_STATS.joins[s], "Joins per profile read", SQL_STATS.joins[p]) +
+      stat(nulls, "NULL columns on this row", prevNulls) +
+      stat(SQL_STATS.stmts[s], "DDL and migration statements so far", SQL_STATS.stmts[p]) + '</div><div class="tables">' + record(s, type);
+    if (s === 2) sql += grid(T_ADDR, true) + grid(T_PREF, true) + grid(T_INT, true);
+    if (s === 3) {
+      sql += grid({ name: "wealth_portfolios", cols: ["portfolio_id", "customer_id", "name", "value_usd"], rows: type === "wealth" ? [[1, 1002, "Growth", "1500000.00"], [2, 1002, "Income", "900000.00"]] : [] }, true);
+      sql += grid({ name: "corporate_signatories", cols: ["signatory_id", "customer_id", "name", "role"], rows: type === "corporate" ? [[1, 1003, "Li Wei Chen", "CFO"], [2, 1003, "Sara Holm", "Director"]] : [] }, true);
+      var CH = CHILD[type];
+      sql += grid({ name: T_ADDR.name, cols: T_ADDR.cols, rows: CH.addr }) + grid({ name: T_PREF.name, cols: T_PREF.cols, rows: CH.pref }) + grid({ name: T_INT.name, cols: T_INT.cols, rows: CH.int });
+    }
+    if (s === 4) {
+      sql += grid(T_CONTACT, true);
+      sql += '<div class="also">Still joined: <code>addresses</code><code>customer_preferences</code><code>customer_interests</code><code>wealth_portfolios</code><code>corporate_signatories</code></div>';
+    }
+    sql += "</div>";
+    document.getElementById("sqlData").innerHTML = sql;
+
+    var mdb = head("MongoDB", "one document per customer", S.mdbPill) + '<div class="stats">' +
+      stat(1, "Collections") + stat(0, "Joins per profile read") + stat(0, "Empty placeholder fields") + stat(0, "Required DDL statements so far") + "</div>";
+    if (s < 3) mdb += code(MDB_DOC[s], "js");
+    else if (s === 3) mdb += code(MDB_TYPED[type], "js");
+    else mdb += '<p class="doclabel">Version 2 document: Elena, already upgraded</p>' + code(MDB_V2, "js") +
+      '<p class="doclabel">Version 1 document: no schemaVersion field, still valid</p>' + code(MDB_V1, "js");
+    document.getElementById("mdbData").innerHTML = mdb;
+  }
+
+  function renderQuery() {
+    var s = state.stage, type = s === 3 ? state.type : "retail";
+    var q = queries(s, type)[state.tab];
+    function side(o, lang, name) {
+      var h = '<div class="phead"><h3 class="side">' + name + ' <small>' + (lang === "sql" ? "PostgreSQL syntax" : "mongosh syntax") + '</small></h3><p class="qtitle">' + q.title + "</p></div>" + code(o.code, lang);
+      if (o.res) h += '<p class="res">' + o.res + "</p>";
+      if (o.grid) h += '<div class="tbl">' + '<div class="scroll"><table class="g"><thead><tr>' + o.grid.cols.map(function (c) { return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>" + o.grid.rows.map(function (r) { return "<tr>" + r.map(function (c) { return "<td>" + c + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div></div>";
+      if (o.note) h += '<p class="note">' + o.note + "</p>";
+      return h;
+    }
+    document.getElementById("sqlQuery").innerHTML = side(q.sql, "sql", "SQL");
+    document.getElementById("mdbQuery").innerHTML = side(q.mdb, "js", "MongoDB");
+  }
+
+  function render() {
+    var s = state.stage, S = STAGES[s];
+    document.getElementById("eyebrow").textContent = "Stage " + (s + 1) + " of 5";
+    document.getElementById("stageTitle").textContent = S.title;
+    document.getElementById("stageSum").textContent = S.sum;
+    document.getElementById("steps").querySelectorAll("button").forEach(function (b, i) {
+      if (i === s) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current");
+    });
+    document.getElementById("typeSeg").hidden = s !== 3;
+    document.getElementById("typeLabel").hidden = s !== 3;
+    document.getElementById("typeSeg").querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.type === state.type)); });
+    document.getElementById("tabs").querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)); });
+    document.getElementById("prevBtn").disabled = s === 0;
+    document.getElementById("nextBtn").disabled = s === 4;
+    renderData(); renderQuery();
+  }
+  function go(i) { state.stage = Math.max(0, Math.min(4, i)); render(); }
+
+  /* ---------- wiring ---------- */
+  var steps = document.getElementById("steps");
+  steps.innerHTML = STAGES.map(function (S, i) { return '<li><button type="button" data-i="' + i + '"><span class="n">' + (i + 1) + "</span>" + S.label + "</button></li>"; }).join("");
+  steps.addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) go(+b.dataset.i); });
+  document.getElementById("prevBtn").addEventListener("click", function () { go(state.stage - 1); });
+  document.getElementById("nextBtn").addEventListener("click", function () { go(state.stage + 1); });
+  document.getElementById("typeSeg").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { state.type = b.dataset.type; render(); } });
+  document.getElementById("tabs").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { state.tab = b.dataset.tab; render(); } });
+  document.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key.toLowerCase();
+    if (k === "arrowright") go(state.stage + 1);
+    else if (k === "arrowleft") go(state.stage - 1);
+    else if (k >= "1" && k <= "5") go(+k - 1);
+    else if (k === "r") { state.tab = "read"; render(); }
+    else if (k === "w") { state.tab = "write"; render(); }
+    else if (k === "s") { state.tab = "schema"; render(); }
+  });
+
+  /* theme */
+  var root = document.documentElement, themeBtn = document.getElementById("themeBtn");
+  function isDark() {
+    var t = root.getAttribute("data-theme");
+    return t ? t === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function label() { themeBtn.textContent = isDark() ? "Light mode" : "Dark mode"; }
+  try { var saved = localStorage.getItem("theme"); if (saved === "dark" || saved === "light") root.setAttribute("data-theme", saved); } catch (e) {}
+  themeBtn.addEventListener("click", function () {
+    var next = isDark() ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch (e) {}
+    label();
+  });
+  label();
+
+  var m = /^#stage-([1-5])$/.exec(location.hash);
+  if (m) state.stage = +m[1] - 1;
+  render();
+})();
+</script>
+
+</body>
+</html>
