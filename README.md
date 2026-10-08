@@ -205,6 +205,8 @@ Change v2 goes through that process *more than once*: the expand step, the dual-
 
 The demo runs both databases side by side so the audience can see each difference happen. Allow about 15 minutes to set up and 20 minutes to run it.
 
+> **Prefer a browser to a wall of terminals?** The [demo web UI](webui/README.md) runs the same scripts from one page, with the steps below, live output, a lock monitor and warnings before common mistakes. Start it with `python webui/server.py`. The rest of this section is the terminal walkthrough.
+
 ### Setup
 
 The project layout:
@@ -214,8 +216,10 @@ The project layout:
 ├── DEEP_DIVE.md         details and objection handling
 ├── docker-compose.yml   PostgreSQL 16
 ├── requirements.txt     pymongo + psycopg2
+├── sql-vs-mongodb-schema-evolution.html   a one-page illustration (see Further reading)
 ├── mongodb/             the MongoDB scripts
-└── postgres/            the PostgreSQL scripts (same names, same steps)
+├── postgres/            the PostgreSQL scripts (same names, same steps)
+└── webui/               the demo web UI: runs the same scripts from a browser
 ```
 
 **Python.** From this directory, install both drivers:
