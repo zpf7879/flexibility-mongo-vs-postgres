@@ -29,6 +29,7 @@ import importlib.util
 import itertools
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -37,7 +38,7 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 import psycopg2
 import psycopg2.extras
@@ -90,6 +91,115 @@ SERVICES = {"microservice_one.py", "microservice_two.py", "microservice_two_v2.p
 DOCKER_ACTIONS = {"up": ["up", "-d"], "down": ["down", "-v"], "ps": ["ps"]}
 
 settings = {"mongo_uri": os.environ.get("MONGODB_URI", "")}
+
+
+# ---------------------------------------------------------------------------
+# MongoDB connection: the page asks for hostname, user and password, and the
+# URI is built here, so special characters in the password are escaped.
+# ---------------------------------------------------------------------------
+
+def split_mongo_uri(uri):
+    """(host, user, password) from a URI, for pre-filling the form."""
+    if "://" not in uri:
+        return "", "", ""
+    rest = uri.split("://", 1)[1].split("/", 1)[0].split("?", 1)[0]
+    creds, _, host = rest.rpartition("@")
+    user, _, password = creds.partition(":")
+    return host, unquote(user), unquote(password)
+
+
+def build_mongo_uri(host, user, password):
+    host = host.strip()
+    # Tolerate a pasted URI or hostname with a scheme, path or credentials.
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0].split("?", 1)[0].rpartition("@")[2]
+    if not host:
+        raise ValueError("Enter the cluster hostname, e.g. cluster0.abcde.mongodb.net")
+    # An Atlas hostname uses SRV; a host with a port (or a list of them),
+    # or a local server, is a plain mongodb:// address.
+    local = host.split(":")[0] in ("localhost", "127.0.0.1")
+    scheme = "mongodb" if ":" in host or local else "mongodb+srv"
+    creds = f"{quote_plus(user)}:{quote_plus(password)}@" if user else ""
+    return f"{scheme}://{creds}{host}/"
+
+
+def mongo_form_uri(body):
+    host, user = (body.get("host") or ""), (body.get("user") or "").strip()
+    password = body.get("password") or ""
+    # A blank password means "keep the one already set" for the same user.
+    saved_host, saved_user, saved_password = split_mongo_uri(settings["mongo_uri"])
+    if not password and user == saved_user:
+        password = saved_password
+    return build_mongo_uri(host, user, password)
+
+
+def mongo_form():
+    host, user, password = split_mongo_uri(settings["mongo_uri"])
+    return {"host": host, "user": user, "has_password": bool(password)}
+
+
+def short_error(e):
+    text = str(e)
+    for tail in (", Timeout:", ", full error:", " (configured timeouts:"):
+        text = text.split(tail)[0]
+    return text.strip()[:300]
+
+
+def server_errors(e):
+    """The per-server errors inside a server selection timeout, if any."""
+    found = re.findall(r"error=\w+\('([^']*)'\)", str(e))
+    return list(dict.fromkeys(short_error(f) for f in found))
+
+
+def explain_mongo_error(e):
+    """(what went wrong and what to check, raw detail) for a failed connection."""
+    raw = short_error(e)
+    text = str(e)
+    if isinstance(e, pymongo.errors.OperationFailure) and (e.code == 18 or "auth" in text.lower()):
+        return ("Wrong username or password. Check them under Database Access in Atlas "
+                "(the database user, not your Atlas login).", raw)
+    if isinstance(e, pymongo.errors.ConfigurationError) and "DNS" in text:
+        return ("Hostname not found. Copy the cluster hostname from Atlas: Connect → Drivers, "
+                "the part after @ in the connection string.", raw)
+    if isinstance(e, pymongo.errors.ServerSelectionTimeoutError):
+        details = server_errors(e) or [raw]
+        joined = " ".join(details).lower()
+        if "ssl" in joined or "tls" in joined or "certificate" in joined:
+            return ("The cluster was found, but the TLS handshake failed. This usually means "
+                    "your IP address isn't in the Atlas Network Access list (Atlas closes the "
+                    "connection), or a proxy or antivirus is intercepting TLS.", details[0])
+        if "refused" in joined:
+            return ("Connection refused: nothing is listening on that host and port.", details[0])
+        if "timed out" in joined or "no replica set members found" in joined or "no servers found" in joined:
+            return ("The cluster was found, but none of its servers answered. Most likely your "
+                    "current IP address isn't in Atlas under Security → Network Access (use "
+                    "\"Add current IP address\"), or a firewall or VPN is blocking port 27017.",
+                    details[0])
+        return ("Couldn't reach any server in the cluster.", details[0])
+    return (raw, None)
+
+
+def test_mongo(uri):
+    client = None
+    try:
+        # Created inside the try: an unknown Atlas hostname fails right here,
+        # at the SRV lookup. Each connection attempt gives up well before
+        # server selection does, so the real per-server error is reported
+        # instead of a bare "no replica set members found yet".
+        client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=12000,
+                                     connectTimeoutMS=5000, appname=APP_NAME)
+        status = client.admin.command("connectionStatus")
+        users = [u["user"] for u in status["authInfo"]["authenticatedUsers"]]
+        version = client.server_info()["version"]
+        who = f" as {users[0]}" if users else " (no user: not authenticated)"
+        return {"ok": True, "message": f"Connected to MongoDB {version}{who}."}
+    except Exception as e:
+        message, detail = explain_mongo_error(e)
+        return {"ok": False, "error": message, "detail": detail}
+    finally:
+        if client:
+            client.close()
 
 
 # ---------------------------------------------------------------------------
@@ -279,12 +389,13 @@ _mongo_lock = threading.Lock()
 def mongo_collection():
     uri = settings["mongo_uri"]
     if not uri:
-        raise RuntimeError("MONGODB_URI is not set")
+        raise RuntimeError("MongoDB connection not set")
     with _mongo_lock:
         if _mongo["uri"] != uri:
             if _mongo["client"]:
                 _mongo["client"].close()
-            _mongo["client"] = pymongo.MongoClient(uri, serverSelectionTimeoutMS=4000, appname=APP_NAME)
+            _mongo["client"] = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5000,
+                                                   connectTimeoutMS=3000, appname=APP_NAME)
             _mongo["uri"] = uri
         return _mongo["client"][MONGO.DB_NAME][MONGO.COLLECTION_NAME]
 
@@ -306,7 +417,7 @@ def mongo_status():
         out["hobbies_objects"] = coll.count_documents({"hobbies": {"$elemMatch": {"name": {"$exists": True}}}})
         out["ok"] = True
     except Exception as e:
-        out["err"] = str(e).split(", Timeout:")[0][:300]
+        out["err"] = explain_mongo_error(e)[0]
     return out
 
 
@@ -504,7 +615,7 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == "/api/events":
             self._events(url)
         elif url.path == "/api/state":
-            self._json({"procs": proc_state(), "status": status()})
+            self._json({"procs": proc_state(), "status": status(), "mongo_form": mongo_form()})
         elif url.path == "/api/locks":
             try:
                 self._json({"rows": locks()})
@@ -566,8 +677,11 @@ class Handler(BaseHTTPRequestHandler):
                 run_docker(body.get("action"))
             elif path == "/api/reset":
                 threading.Thread(target=reset, args=(bool(body.get("docker")),), daemon=True).start()
-            elif path == "/api/mongo-uri":
-                settings["mongo_uri"] = (body.get("uri") or "").strip()
+            elif path == "/api/mongo-test":
+                self._json(test_mongo(mongo_form_uri(body)))
+                return
+            elif path == "/api/mongo-settings":
+                settings["mongo_uri"] = mongo_form_uri(body)
                 _status_cache["at"] = 0
             else:
                 self.send_error(404)
@@ -588,7 +702,7 @@ def main():
     url = f"http://127.0.0.1:{args.port}/"
     print(f"Demo web UI running at {url}  (Ctrl+C to stop; running scripts are stopped too)")
     if not settings["mongo_uri"]:
-        print("MONGODB_URI is not set: you can enter it in the page instead.")
+        print("MONGODB_URI is not set: enter the MongoDB hostname, user and password in the page instead.")
     if not args.no_browser:
         threading.Timer(0.5, webbrowser.open, (url,)).start()
     try:

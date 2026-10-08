@@ -79,7 +79,7 @@ function facts(db) {
   const st = (S.status && S.status[db]) || {};
   if (db === M) {
     return {
-      ok: st.ok, err: st.err || (S.status && !st.uri_set ? "MONGODB_URI is not set" : null),
+      ok: st.ok, err: st.err || (S.status && !st.uri_set ? "MongoDB connection not set" : null),
       loaded: (st.count || 0) > 0,
       v1: (st.with_department || 0) > 0,
       v2: (st.hobbies_objects || 0) > 0,
@@ -168,12 +168,12 @@ const STEPS = [
     id: "setup", n: "0", title: "Setup and pre-flight",
     lead: "Do this before the audience arrives: both status chips in the top bar should turn green.",
     points: [
-      "<span class='db mongodb'>MongoDB</span>: an M10 Atlas cluster. Enter its connection string with <b>MongoDB URI</b>, unless <code>MONGODB_URI</code> was set when the server started.",
+      "<span class='db mongodb'>MongoDB</span>: an M10 Atlas cluster. Enter its hostname, user and password with <b>MongoDB connection</b> and click <b>Test connection</b>, unless <code>MONGODB_URI</code> was set when the server started.",
       "<span class='db postgres'>PostgreSQL</span>: Postgres 16 in Docker, on <code>localhost:5432</code>. Start it below; the first start takes a few seconds before it accepts connections.",
       "Ran the demo before? Use <b>Reset…</b> (top right) to start clean.",
     ],
     actions: [
-      { kind: "uri", label: "Set the MongoDB connection string" },
+      { kind: "uri", label: "Set and test the MongoDB connection" },
       { kind: "docker", action: "up", label: "Start PostgreSQL", cmd: "docker compose up -d" },
       { kind: "docker", action: "ps", label: "Show the container status", cmd: "docker compose ps" },
     ],
@@ -473,6 +473,7 @@ async function refreshState() {
     const j = await r.json();
     S.status = j.status;
     S.procs = j.procs;
+    S.mongoForm = j.mongo_form;
     renderAll();
     if (firstState) {
       firstState = false;
@@ -485,9 +486,9 @@ async function refreshState() {
 function renderDbState() {
   if (!S.status) return;
   const m = S.status.mongodb;
-  setChip("mongodb", m.ok ? "ok" : "bad", m.ok ? `Connected to ${m.host}` : m.err || "MONGODB_URI is not set");
+  setChip("mongodb", m.ok ? "ok" : "bad", m.ok ? `Connected to ${m.host}` : m.err || "MongoDB connection not set");
   const mEl = $("#state-mongodb");
-  if (!m.uri_set) mEl.innerHTML = "<span class='err'>No connection string yet.</span> Use <b>MongoDB URI</b> at the top.";
+  if (!m.uri_set) mEl.innerHTML = "<span class='err'>Not connected yet.</span> Use <b>MongoDB connection</b> at the top.";
   else if (!m.ok) mEl.innerHTML = `<span class='err'>${esc(m.err)}</span>`;
   else if (!m.count) mEl.innerHTML = `${esc(m.host)} · no employees yet`;
   else mEl.innerHTML =
@@ -694,9 +695,64 @@ async function loadPeek(db) {
 function openUri() {
   const dlg = $("#dlg-uri");
   if (dlg.open) return;
-  $("#uri-input").value = "";
-  dlg.returnValue = "";
+  // Pre-fill what's already set; the password itself never comes back.
+  const form = S.mongoForm || {};
+  $("#mongo-host").value = form.host || "";
+  $("#mongo-user").value = form.user || "";
+  $("#mongo-password").value = "";
+  $("#mongo-password").placeholder = form.has_password ? "unchanged (leave blank to keep it)" : "";
+  mongoResult(null);
   dlg.showModal();
+  (form.host ? $("#mongo-password") : $("#mongo-host")).focus();
+}
+
+const mongoFields = () => ({
+  host: $("#mongo-host").value.trim(),
+  user: $("#mongo-user").value.trim(),
+  password: $("#mongo-password").value,
+});
+
+function mongoResult(text, cls, detail) {
+  const el = $("#mongo-result");
+  el.hidden = !text;
+  el.className = "testresult" + (cls ? " " + cls : "");
+  el.replaceChildren(text || "", detail ? h("span", { class: "detail" }, detail) : "");
+}
+
+function mongoBusy(busy) {
+  for (const id of ["#mongo-test", "#mongo-save"]) $(id).disabled = busy;
+}
+
+async function testMongo() {
+  mongoBusy(true);
+  mongoResult("Connecting…");
+  try {
+    const r = await fetch("/api/mongo-test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(mongoFields()),
+    });
+    const j = await r.json();
+    if (j.ok) mongoResult("✓ " + j.message, "ok");
+    else mongoResult("✗ " + j.error, "err", j.detail);
+  } catch (e) {
+    mongoResult("✗ " + e.message, "err");
+  } finally {
+    mongoBusy(false);
+  }
+}
+
+async function saveMongo() {
+  mongoBusy(true);
+  try {
+    await post("/api/mongo-settings", mongoFields());
+    $("#dlg-uri").close();
+    refreshState();
+  } catch (e) {
+    mongoResult("✗ " + e.message, "err");
+  } finally {
+    mongoBusy(false);
+  }
 }
 
 function openReset() {
@@ -713,13 +769,15 @@ function wireUi() {
   $("#btn-stop-all").onclick = () => post("/api/stop-all").catch(showError("system"));
   $("#btn-reset").onclick = openReset;
 
-  $("#uri-show").onchange = (e) => { $("#uri-input").type = e.target.checked ? "text" : "password"; };
-  $("#dlg-uri").addEventListener("close", async () => {
-    if ($("#dlg-uri").returnValue !== "ok") return;
-    const uri = $("#uri-input").value.trim();
-    if (!uri) return;
-    try { await post("/api/mongo-uri", { uri }); } catch (e) { showError("system")(e); }
-    refreshState();
+  $("#mongo-show").onchange = (e) => { $("#mongo-password").type = e.target.checked ? "text" : "password"; };
+  $("#mongo-test").onclick = testMongo;
+  $("#mongo-save").onclick = saveMongo;
+  $("#mongo-cancel").onclick = () => $("#dlg-uri").close();
+  $("#dlg-uri").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.tagName === "INPUT" && e.target.type !== "checkbox") {
+      e.preventDefault();
+      saveMongo();
+    }
   });
   $("#dlg-reset").addEventListener("close", async () => {
     if ($("#dlg-reset").returnValue !== "ok") return;

@@ -18,7 +18,7 @@
       <span class="chip" id="chip-stream"><i></i>Live output</span>
     </div>
     <div class="top-actions">
-      <button id="btn-uri">MongoDB URI</button>
+      <button id="btn-uri">MongoDB connection</button>
       <button id="btn-locks">Lock monitor</button>
       <button id="btn-stop-all">Stop all</button>
       <button id="btn-reset" class="danger">Reset…</button>
@@ -83,13 +83,24 @@
 
   <dialog id="dlg-uri">
     <form method="dialog">
-      <h3>MongoDB connection string</h3>
+      <h3>MongoDB connection</h3>
       <p class="muted small">Kept in the server's memory for this session only and passed to the MongoDB scripts as <code>MONGODB_URI</code>. It's never written to a file. To skip this step, set <code>MONGODB_URI</code> before starting the server.</p>
-      <input id="uri-input" type="password" autocomplete="off" spellcheck="false" placeholder="mongodb+srv://main_user:&lt;password&gt;@&lt;your-cluster&gt;/">
-      <label class="small"><input type="checkbox" id="uri-show"> Show</label>
+      <label class="field">Hostname
+        <input id="mongo-host" type="text" autocomplete="off" spellcheck="false" placeholder="cluster0.abcde.mongodb.net">
+      </label>
+      <label class="field">Username
+        <input id="mongo-user" type="text" autocomplete="off" spellcheck="false" placeholder="main_user">
+      </label>
+      <label class="field">Password
+        <input id="mongo-password" type="password" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="small"><input type="checkbox" id="mongo-show"> Show password</label>
+      <p class="muted small">An Atlas hostname connects with <code>mongodb+srv://</code>. A hostname with a port, such as <code>localhost:27017</code>, connects with <code>mongodb://</code>.</p>
+      <div id="mongo-result" class="testresult" role="status" hidden></div>
       <div class="dlg-actions">
-        <button value="cancel">Cancel</button>
-        <button value="ok" class="primary">Use this URI</button>
+        <button type="button" id="mongo-test" class="left">Test connection</button>
+        <button type="button" id="mongo-cancel">Cancel</button>
+        <button type="button" id="mongo-save" class="primary">Save</button>
       </div>
     </form>
   </dialog>

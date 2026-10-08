@@ -211,6 +211,13 @@ dialog input[type=password], dialog input[type=text] {
   border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text);
 }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.dlg-actions .left { margin-right: auto; }
+.field { display: block; margin-top: 8px; font-weight: 600; font-size: 13px; }
+.field input { font-weight: normal; }
+.testresult { margin: 10px 0 0; padding: 7px 10px; border-radius: 6px; font-size: 13px; background: var(--surface-2); }
+.testresult.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.testresult.err { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+.testresult .detail { display: block; margin-top: 4px; color: var(--muted); font: 11.5px/1.4 var(--mono); word-break: break-word; }
 
 @media (max-width: 1100px) {
   .columns { grid-template-columns: minmax(0, 1fr); }
