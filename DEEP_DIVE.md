@@ -86,6 +86,12 @@ with conn:
 
 For a small app with a single service, that can be a reasonable trade. On a shared database, dual writes are the safe default. Either way it's still a staged migration with an ordered copy, which MongoDB doesn't need.
 
+**Where MongoDB needs no dual write at all: consumers that just pass the data through.** Many old consumers don't interpret hobbies. They read them and display them: an API that returns the employee as JSON to a UI, a page that renders the list, a report that prints it.
+- **In MongoDB,** the new shape is written to the same field of the same document, so these consumers still get the new data, unchanged and without a deploy. At worst it looks less tidy, such as `{name: "cycling", level: "advanced", since: 2019}` instead of `cycling`, and if that matters, it's visible on screen.
+- **In PostgreSQL,** once a writer stops updating the array, the same consumer reads the old column and gets either `NULL`, if the writer clears it, or the old hobbies, if it doesn't. Stale data is the worse case: it looks correct, nothing raises an error, and nobody can tell that the real data has moved to a table the consumer doesn't know about. Preventing that silent failure is what dual writes are for.
+
+This only covers consumers that don't depend on the shape. One that maps hobbies to a typed list of strings (a Java POJO, a Go struct, a Pydantic model), or works on each item as a string, breaks in MongoDB too. It needs the tolerant reader before any new-shape write, as described [below](#what-the-mongodb-side-really-involves). The difference is how each fails: MongoDB fails loudly and only for consumers that care about the shape, while PostgreSQL fails silently for every consumer of the old column.
+
 **Step 3: copy existing data.** Every hobby already in the array has to be copied before anything can read from the table. On a large table, do it in batches so no single transaction runs for long:
 
 ```sql
