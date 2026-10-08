@@ -99,7 +99,7 @@ If a dual-written employee is saved while the copy runs, the copy and the app ca
 
 **Step 4: switch reads.** Deploy the version of every reader that uses the table. From now on, reading an employee's hobbies is a join plus an aggregate. In the demo, this is the move from `microservice_two.py` to `microservice_two_v2.py`.
 
-**Step 5: contract.** Remove the dual writes and deploy again. Then, once no deployed code reads or writes the array:
+**Step 5: contract (optional).** Like converting the old documents in MongoDB, this step can wait, or never happen. Until it does, every save writes hobbies twice, and the array is a second copy that has to stay in sync. To clean up, remove the dual writes and deploy again. Then, once no deployed code reads or writes the array:
 
 ```sql
 SET lock_timeout = '2s';
@@ -108,7 +108,7 @@ ALTER TABLE employees DROP COLUMN hobbies;
 
 Do this too early and any old reader still running fails with `UndefinedColumn`. The demo shows it: run `alter_model_v2.py --contract` while the v1 `microservice_two.py` is still up.
 
-That's one table, two app deploys before the cleanup (dual write, read switch), a third deploy to remove the dual writes, a batched copy, and two DDL steps that each need lock care. Each deploy goes through the team's normal release process (Difference 3 in the blog post).
+That's one table, two app deploys (dual write, read switch), a batched copy, and a DDL step that needs lock care. The optional cleanup adds a third deploy to remove the dual writes, and a second DDL step. Each deploy goes through the team's normal release process (Difference 3 in the blog post).
 
 ### What the MongoDB side really involves
 
@@ -140,12 +140,12 @@ Side by side:
 
 | | MongoDB | PostgreSQL |
 |---|---|---|
-| Schema change | None | `CREATE TABLE` + FK + index, later `DROP COLUMN` |
+| Schema change | None | `CREATE TABLE` + FK + index, optionally `DROP COLUMN` later |
 | Writes during the transition | One `$set` with the new shape | Dual write to array and table, in a transaction |
 | Existing data | Convert gradually, or not at all | Must copy all of it, in batches, before reads switch |
 | Readers | Accept both shapes during the transition | Switch from the array to a join, in a separate deploy |
 | Old and new shape together | Yes, in the same collection | Only by keeping two copies (array and table) in sync |
-| Deploys | Tolerant readers, then new-shape writers | Dual write, read switch, remove dual write |
+| Deploys | Tolerant readers, then new-shape writers | Dual write, read switch, optionally remove dual write |
 | After the migration | Same `find_one` and `$set` | Joins and multi-table transactions from then on |
 
 So the old app is still fine and nobody needs downtime, in either database. The cost of the Postgres side is in the migration itself, and then in living with the child table. The rest of this section is about that second part.
@@ -434,10 +434,10 @@ Concede these before the audience raises them:
 | Concern | MongoDB | PostgreSQL |
 |---|---|---|
 | Flat list of strings (v1) | Array field | `text[]` column (a draw) |
-| List items gain fields (v2) | No DDL; readers accept both shapes; convert gradually | Expand-contract: table, dual write, batched copy, read switch, `DROP COLUMN` |
+| List items gain fields (v2) | No DDL; readers accept both shapes; convert gradually | Expand-contract: table, dual write, batched copy, read switch, optional `DROP COLUMN` |
 | Downtime for the old app | None | None |
 | Old app code change | None | None |
-| DDL needed for v2 | None | `CREATE TABLE` + FK + `emp_no` index, later `DROP COLUMN` (the `department` index is needed in both) |
+| DDL needed for v2 | None | `CREATE TABLE` + FK + `emp_no` index, optionally `DROP COLUMN` later (the `department` index is needed in both) |
 | Replace the list atomically | One `$set` | Transaction + parent-row lock + delete/insert |
 | Add one item, no duplicates | `$addToSet` | `UNIQUE` constraint + `ON CONFLICT DO NOTHING` |
 | Read the whole object | `find_one` | `LEFT JOIN` + `GROUP BY` + `array_agg` (+ `COALESCE`) |
@@ -494,7 +494,7 @@ SELECT e.emp_no, e.first_name, e.last_name, e.department FROM employees e WHERE 
 
 Deploy this before the `ALTER TABLE` has run, and **every query that loads an employee fails** with `ERROR: column e.department does not exist`: login, payroll and search, not just the new report. The generated `INSERT` fails the same way. With `spring.jpa.hibernate.ddl-auto=validate`, the app won't even start. Django, SQLAlchemy, Entity Framework and ActiveRecord behave similarly by default.
 
-It works in reverse for removals. Step 5 of the v2 migration drops the `hobbies` column, and any running version that still maps that field fails on every employee query from then on. So the drop must wait until no deployed version maps it, including any version you might roll back to.
+It works in reverse for removals. If you clean up, step 5 of the v2 migration drops the `hobbies` column, and any running version that still maps that field fails on every employee query from then on. So the drop must wait until no deployed version maps it, including any version you might roll back to.
 
 In MongoDB, a document without `department` loads with that field empty (`null`, `undefined` or a default), and every other query keeps working. The caveat, as in section 4: a mapping layer configured to reject unknown fields, such as a Pydantic model with `extra="forbid"`, can fail on a field it doesn't know. That's a choice in the application's code, not a database rule.
 
@@ -518,11 +518,13 @@ The blog post shows the lock queue and the `lock_timeout` fix. A DBA will also e
 - **`CREATE INDEX` blocks writes.** A plain `CREATE INDEX` (as `alter_model.py` uses for `department`) blocks all writes to the table for the entire build. In production you'd use `CREATE INDEX CONCURRENTLY`, which can't run inside a transaction and can fail, leaving an `INVALID` index that must be dropped and rebuilt.
 - **Foreign keys lock the parent table.** Creating `employee_hobbies` with `REFERENCES employees` (change v2, step 1) takes a `SHARE ROW EXCLUSIVE` lock on `employees`, which blocks writes (not reads) for its duration and queues like any other lock. Use `lock_timeout` here too. On an existing large child table, the usual pattern is `ADD CONSTRAINT ... NOT VALID` followed by a separate `VALIDATE CONSTRAINT`.
 - **MongoDB index builds lock too, briefly.** Both `alter_model.py` scripts create the same `department` index, so compare the builds fairly: since MongoDB 4.2, the default index build takes an exclusive lock on the collection only briefly at the start and end, and allows reads and writes in between. That's closer to `CREATE INDEX CONCURRENTLY` than to a plain `CREATE INDEX`, without the opt-in.
-- **Check for long-open transactions first.** Before running DDL on a busy table, look for sessions that are `idle in transaction`:
+- **Any long-running transaction blocks DDL, not just forgotten ones.** A reporting query, a batch job or a `pg_dump` holds a lock on the table for as long as it runs, and the `ALTER` queues behind it like it would behind an idle session. The demo uses an idle transaction only because it's the easiest to reproduce on stage.
+- **`idle_in_transaction_session_timeout` helps, but only with idle sessions.** Set it server-wide so a forgotten commit can't hold a table for long. It doesn't touch a query that's actively running, so it complements `lock_timeout` and retry rather than replacing them.
+- **Check for long-open transactions first.** Before running DDL on a busy table, look for open transactions, active or idle:
   ```sql
   SELECT pid, state, now() - xact_start AS open_for, left(query, 50) AS query
   FROM pg_stat_activity
-  WHERE state = 'idle in transaction'
+  WHERE xact_start IS NOT NULL AND pid <> pg_backend_pid()
   ORDER BY open_for DESC;
   ```
 

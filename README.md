@@ -130,9 +130,9 @@ In MongoDB it's still `find_one({"emp_no": 10001})`.
 
 `ALTER TABLE` is fast, but it needs an **exclusive lock** on the table for that brief moment. That's where things get interesting.
 
-If *any* transaction has the table open (even one that's just sitting idle because someone forgot to commit), the `ALTER` has to wait. And PostgreSQL queues lock requests in order. So every ordinary `SELECT` that arrives after the `ALTER` waits *behind* it, including the simple reads from the old service.
+If *any* transaction has the table open, the `ALTER` has to wait. That doesn't take a mistake: a reporting query, a batch job or a backup running against the table is enough, and so is a session that's sitting idle because someone forgot to commit. And PostgreSQL queues lock requests in order. So every ordinary `SELECT` that arrives after the `ALTER` waits *behind* it, including the simple reads from the old service.
 
-In other words: **one forgotten transaction plus one harmless-looking `ADD COLUMN` can freeze your old service's reads.**
+In other words: **one long-running transaction plus one harmless-looking `ADD COLUMN` can freeze your old service's reads.**
 
 You can see it happen with this query in `psql`:
 
@@ -144,7 +144,7 @@ You can see it happen with this query in `psql`:
  4103 | {4102}     | active              | SELECT count(*) FROM employees;
 ```
 
-Read it from the bottom up: an ordinary read (4103) is stuck behind the schema change (4102), which is stuck behind an idle transaction (4101) that has nothing to do with either of them.
+Read it from the bottom up: an ordinary read (4103) is stuck behind the schema change (4102), which is stuck behind an open transaction (4101) that has nothing to do with either of them. Here it's an idle one, because that's the easiest to reproduce on stage. A long report would block the `ALTER` in exactly the same way.
 
 There's a standard fix. Tell the `ALTER` to give up quickly and try again later, instead of blocking everyone:
 
@@ -154,11 +154,11 @@ ALTER TABLE employees ADD COLUMN department VARCHAR(50);
 -- ERROR: canceling statement due to lock timeout  -> wait, then retry
 ```
 
-It works, and our demo shows it working. But that's the point: **someone has to know to write it.**
+It works, and our demo shows it working. A server-wide `idle_in_transaction_session_timeout` also helps, by ending sessions that sit idle in a transaction for too long, but it doesn't touch a query that's actively running. So the `lock_timeout` and retry are still needed, and that's the point: **someone has to know to write them, for every schema change on a live table.**
 
-And change v2 needs that care twice more:
+And change v2 needs that care up to twice more:
 - **Creating the child table.** The new `employee_hobbies` table is empty, but its foreign key points at `employees`, so creating it takes a lock on `employees` too. That lock doesn't block reads, but it does block writes: it waits for any transaction that's in the middle of writing to `employees`, and new writes queue behind it. The old service keeps reading, but anything saving employees stalls until the lock is granted.
-- **Dropping the old `hobbies` column** at the end of the migration. Like `ADD COLUMN`, `DROP COLUMN` is fast but needs the same exclusive lock, so it can queue behind an idle transaction and freeze reads exactly as shown above.
+- **Dropping the old `hobbies` column**, if you clean up at the end of the migration. Like `ADD COLUMN`, `DROP COLUMN` is fast but needs the same exclusive lock, so it can queue behind a long-running transaction and freeze reads exactly as shown above.
 
 Each one needs its own `lock_timeout` and retry. Adding or reshaping fields in MongoDB involves no schema change and no table lock, so there's nothing to get wrong.
 
@@ -176,7 +176,7 @@ This is the biggest real-world cost, and it isn't about milliseconds at all.
 | 2. Deploy an app that writes the new shape | Must write **both** the array and the new table, in one transaction: until reads switch in step 4, every reader, including old app instances and any rollback, still uses the array | Writes the new shape with one `$set` |
 | 3. Convert existing data | **Required:** copy every hobby from the array into the table, in batches, before anyone reads from the table | **Optional:** convert documents gradually, or leave old ones as they are |
 | 4. Switch reads | Deploy an app that reads with a `JOIN` | No switch; the same `find()` returns both shapes |
-| 5. Clean up | Remove the dual writes, deploy again, then `DROP COLUMN hobbies` | Nothing required. Optionally, convert any documents still in the old shape so the code that reads the old shape can be removed |
+| 5. Clean up | **Optional:** remove the dual writes and deploy again, then `DROP COLUMN hobbies` once nothing reads the array. Until then, every save writes hobbies twice | **Optional:** convert any documents still in the old shape, so the code that reads the old shape can be removed |
 
 **MongoDB isn't free here, either.** A document converted to the new shape sits right next to one that still has plain strings, and any code that reads hobbies has to accept both until the conversion is done. In our demo that's four lines in `microservice_two.py`:
 
@@ -197,7 +197,7 @@ So both databases need a careful rollout. The difference is what that rollout is
 
 That last point is easy to see if you start the new service *before* the change. In MongoDB its query is valid and simply returns no results until the data arrives. In PostgreSQL it fails with `UndefinedColumn`, because the column doesn't exist yet. On its own that's a small difference: both can be handled gracefully, and migration tools such as Flyway often run the schema change when the app starts, which settles the order for you. It grows with ORMs, where every query on a changed entity selects the new column and fails until it exists, and with several services sharing one database, where someone has to own the migration and make sure it lands first.
 
-Change v2 goes through that process *more than once*: the expand step, the dual-write release, the copy, the read switch and the cleanup each need scheduling. That's often weeks of calendar time. With MongoDB, the data change ships with the application code that uses it. You still review and test that code, of course, but there's no separate database release to schedule.
+Change v2 goes through that process *more than once*: the expand step, the dual-write release, the copy and the read switch each need scheduling, and so does the cleanup when you get to it. That's often weeks of calendar time. With MongoDB, the data change ships with the application code that uses it. You still review and test that code, of course, but there's no separate database release to schedule.
 
 ---
 
